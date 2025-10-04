@@ -1,0 +1,46 @@
+# Helper files (documentation/guides - not for public repo)
+helper-files/
+
+# Simulation artifacts
+obj_dir/
+*.vcd
+*.wdb
+*.fsdb
+*.log
+*.dump
+*.out
+simv*
+csrc/
+DVEfiles/
+work/
+transcript
+*.vstf
+
+# Verilator
+*.d
+*.o
+*.a
+*.mk
+
+# Build artifacts
+build/
+*.pyc
+__pycache__/
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+*.sublime-*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.bak
+*.orig
+
