@@ -47,6 +47,7 @@ module int8_mac_coprocessor
   logic [XLEN-1:0]    result;
   logic               result_valid;
   logic               we;
+  logic               overflow;  // Overflow/saturation flag
 
   assign compressed_req    = cvxif_req_i.compressed_req;
   assign compressed_valid  = cvxif_req_i.compressed_valid;
@@ -110,6 +111,7 @@ module int8_mac_coprocessor
       .result_o   (result),
       .valid_o    (result_valid),
       .we_o       (we),
+      .overflow_o (overflow),
       .rd_addr_o  (rd),
       .hartid_o   (hartid),
       .id_o       (id)
@@ -122,6 +124,22 @@ module int8_mac_coprocessor
     cvxif_resp_o.result.data   = result;
     cvxif_resp_o.result.rd     = rd;
     cvxif_resp_o.result.we     = we;
+    // Note: overflow flag not part of standard CVXIF result
+    // Could be exposed via custom CSR or debug interface in future
   end
+  
+  // Assertions for top-level verification
+  `ifndef SYNTHESIS
+  // Check CVXIF protocol compliance
+  property p_issue_accept_implies_ready;
+    @(posedge clk_i) disable iff (!rst_ni)
+    (issue_resp.accept |-> issue_ready);
+  endproperty
+  assert property (p_issue_accept_implies_ready) 
+    else $error("Accepted instruction but not ready");
+  
+  // Coverage: Track overflow events for debug
+  cover property (@(posedge clk_i) overflow);
+  `endif
 
 endmodule
