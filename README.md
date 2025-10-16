@@ -10,17 +10,11 @@
 
 ## 🚀 **What's New (October 2025)**
 
-**Latest Release - Garuda 1.0:**
-- ✅ **Bug Fix:** Corrected INT8 saturation values (oct-15-2025)
-- ✅ **New Feature:** Overflow detection flag for debugging
-- ✅ **Verification:** Added SystemVerilog assertions and coverage
-
-**Next - Garuda 2.0 (In Design):**
-- 🔬 **INT4-first architecture** (4× throughput vs INT8)
-- 🔬 **FlashAttention-inspired tiling** (2-4× speedup on transformers)
-- 🔬 **Sparse-native dataflow** (90% efficiency on sparse networks)
-- 🔬 **KV-cache management** for LLM inference
-- 📚 See `GARUDA_2_*` docs for complete research and design specs
+**Latest Updates:**
+- ✅ **Bug Fix:** Corrected INT8 saturation values for proper two's complement representation
+- ✅ **New Feature:** Overflow detection flag for debugging and profiling
+- ✅ **Verification:** Added SystemVerilog assertions for protocol compliance
+- ✅ **Coverage:** Added overflow tracking properties for better testing
 
 ---
 
@@ -224,48 +218,12 @@ rs1[7:0]  rs2[7:0]
 
 Performance depends on memory bandwidth and cache behavior.
 
-## 🔬 Garuda 2.0 (Research Phase)
-
-**Vision:** Next-generation sparse-native, multi-precision accelerator for edge AI
-
-**Target Features:**
-- **INT4-First Design:** 4× throughput (51 GOPS INT4 vs 25 GOPS INT8)
-- **Sparse-Native:** 90% efficiency on sparse attention transformers
-- **FlashAttention Hardware:** Memory hierarchy optimized for attention tiling
-- **KV-Cache Manager:** Specialized hardware for LLM inference
-- **Multi-Tile Architecture:** Scalable from 1 to 1024 tiles
-- **Async Execution:** Producer-consumer pipeline (1.5-2× utilization)
-
-**Research Documentation (170+ pages):**
-- [`GARUDA_2_INDEX.md`](GARUDA_2_INDEX.md) - Start here (navigation hub)
-- [`GARUDA_2_RESEARCH_FOUNDATION.md`](GARUDA_2_RESEARCH_FOUNDATION.md) - Novel architectural principles
-- [`GARUDA_2_TECHNICAL_SPEC.md`](GARUDA_2_TECHNICAL_SPEC.md) - Complete RTL specifications
-- [`GARUDA_2_READING_LIST.md`](GARUDA_2_READING_LIST.md) - 25 key papers to read
-- [`GARUDA_2_COMPETITIVE_ANALYSIS.md`](GARUDA_2_COMPETITIVE_ANALYSIS.md) - vs. H100, MI300X, TPU v5
-- [`GARUDA_2_GETTING_STARTED.md`](GARUDA_2_GETTING_STARTED.md) - 48-week implementation plan
-
-**Key Research Insights:**
-- FlashAttention (2022-2024): Memory hierarchy tiling is critical
-- AWQ/SmoothQuant (2023): INT4 achieves <1% accuracy loss on LLMs
-- Sparse attention: 70-90% of attention weights are near-zero
-- Commercial comparison: vs. NVIDIA H100 (700W), AMD MI300X (750W)
-
-**Timeline:** 48 weeks (5 weeks research + 43 weeks implementation)  
-**Status:** Phase 0 - Literature review (FlashAttention, INT4 quantization)
-
----
-
 ## 📚 Documentation
 
-**Garuda 1.0 (Current):**
-- See `garuda/README.md` for RTL documentation
+**RTL Documentation:**
+- See `garuda/README.md` for detailed RTL documentation
 - Inline code comments in all source files
-- CVA6 integration guide in `garuda/` directory
-
-**Garuda 2.0 (Research):**
-- 7 comprehensive design documents (see above)
-- 25 research papers reading list
-- Complete technical specifications with RTL examples
+- Module hierarchy and integration guide
 
 **External References:**
 - [CV-X-IF Specification](https://github.com/openhwgroup/core-v-xif)
@@ -286,64 +244,44 @@ cd garuda
 ./run_sim.sh verilator
 ```
 
-### 3. Explore Garuda 2.0 Research
+### 3. Explore Documentation
 ```bash
-# Start with the index
-cat GARUDA_2_INDEX.md
+# RTL documentation
+cat garuda/README.md
 
-# Read the research foundation
-cat GARUDA_2_RESEARCH_FOUNDATION.md
-
-# Week 1 reading: FlashAttention!
-# https://arxiv.org/abs/2205.14135
+# View instruction definitions
+cat garuda/rtl/int8_mac_instr_pkg.sv
 ```
 
 ---
 
-## 📊 Performance Comparison
+## 📊 Performance
 
-### Garuda 1.0 (Current - Proof of Concept)
-- **Performance:** 25 GOPS (INT8)
-- **Power:** ~10W
-- **Area:** ~200 LUTs per MAC
-- **Use Case:** Educational, simple edge inference
+### Current Implementation
+- **Peak Performance:** ~25 GOPS (INT8)
+- **Power:** ~10W (estimated)
+- **Latency:** 3-4 cycles per MAC operation
+- **Resource Usage:** ~200 LUTs per MAC unit
+- **Fmax:** 100+ MHz (FPGA), 1+ GHz (ASIC target)
 
-### Garuda 2.0 (Design Phase - Production Target)
-- **Performance:** 51 GOPS (INT4), 25 GOPS (INT8)
-- **Sparse Efficiency:** 90% (vs. 10% for TPU, 50% for H100)
-- **Power:** 10W
-- **GOPS/Watt:** 4.6 (sparse) - **better than H100 (2.8)!**
-- **Use Case:** Edge AI, research, sparse transformers, LLM inference
-
-### vs. Commercial Accelerators (2025)
-
-| Feature | H100 | MI300X | **Garuda 2.0** | Garuda Advantage |
-|---------|------|--------|----------------|------------------|
-| Peak INT4 | 7,920 GOPS | 5,200 GOPS | 51 GOPS | ❌ 100-150× slower |
-| Sparse (90%) | 3,960 GOPS | 2,600 GOPS | 46 GOPS | ❌ 86× slower |
-| Power | 700W | 750W | 10W | ✅ **70× better** |
-| GOPS/W (sparse) | 5.7 | 3.5 | **4.6** | ✅ Better than MI300X |
-| Cost | $30K+ | $25K+ | $50-500 | ✅ **600× cheaper** |
-| Open Source | ❌ | ❌ | ✅ | ✅ Community |
-
-**Our Niche:** Edge AI, research, sparse networks, safety-critical applications
+### Use Cases
+- Edge AI inference (resource-constrained devices)
+- Embedded neural networks
+- Educational projects
+- RISC-V accelerator research
 
 ---
 
-## 📚 References & Research
-
-**Key Papers (2021-2025):**
-- [FlashAttention](https://arxiv.org/abs/2205.14135) - Memory-efficient attention
-- [AWQ](https://arxiv.org/abs/2306.00978) - INT4 quantization
-- [EIE](https://arxiv.org/abs/1602.01528) - Sparse acceleration
-- [BitFusion](https://arxiv.org/abs/1712.01507) - Mixed-precision hardware
+## 📚 References
 
 **RISC-V:**
 - [CV-X-IF Specification](https://github.com/openhwgroup/core-v-xif)
 - [CVA6 Documentation](https://docs.openhwgroup.org/projects/cva6-user-manual/)
 - [RISC-V ISA Manual](https://riscv.org/technical/specifications/)
 
-**See [`GARUDA_2_READING_LIST.md`](GARUDA_2_READING_LIST.md) for complete bibliography (25 papers)**
+**Neural Network Quantization:**
+- [Quantization and Training of Neural Networks](https://arxiv.org/abs/1712.05877)
+- [Survey of Quantization Methods](https://arxiv.org/abs/2103.13630)
 
 ---
 
@@ -354,7 +292,7 @@ We welcome contributions! Areas of interest:
 - Testbench enhancements
 - Software examples and benchmarks
 - Documentation improvements
-- Garuda 2.0 research and design
+- Performance analysis and benchmarking
 
 ---
 
