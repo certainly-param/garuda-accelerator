@@ -34,6 +34,12 @@ module int8_mac_unit
   logic signed [8:0]  sum_9bit;
   logic signed [31:0] sum_32bit;
   
+  // SIMD Dot Product Signals
+  logic signed [7:0]  rs1_bytes [3:0];
+  logic signed [7:0]  rs2_bytes [3:0];
+  logic signed [15:0] products [3:0];
+  logic signed [31:0] dot_product;
+
   logic [XLEN-1:0] result_comb;
   logic            valid_comb, we_comb;
   logic            overflow_comb;
@@ -45,6 +51,7 @@ module int8_mac_unit
   hartid_t         hartid_q;
   id_t             id_q;
 
+  // Scalar assignments
   assign a = rs1_i[7:0];
   assign b = rs2_i[7:0];
   assign acc_8bit = rd_i[7:0];
@@ -52,6 +59,30 @@ module int8_mac_unit
   assign product = a * b;
   assign sum_9bit = $signed({product[7], product[7:0]}) + $signed({acc_8bit[7], acc_8bit});
   assign sum_32bit = $signed({{16{product[15]}}, product}) + $signed(rd_i);
+
+  // SIMD assignments
+  always_comb begin
+    rs1_bytes[0] = rs1_i[7:0];
+    rs1_bytes[1] = rs1_i[15:8];
+    rs1_bytes[2] = rs1_i[23:16];
+    rs1_bytes[3] = rs1_i[31:24];
+
+    rs2_bytes[0] = rs2_i[7:0];
+    rs2_bytes[1] = rs2_i[15:8];
+    rs2_bytes[2] = rs2_i[23:16];
+    rs2_bytes[3] = rs2_i[31:24];
+
+    for (int i = 0; i < 4; i++) begin
+      products[i] = rs1_bytes[i] * rs2_bytes[i];
+    end
+    
+    // Sum 4 products + accumulator
+    // Note: Intermediate sums can grow, but final result fits in 32-bit (mostly)
+    // 4 * (127 * 127) = 64516, which fits in 17 bits. 32-bit acc is safe.
+    dot_product = $signed(products[0]) + $signed(products[1]) + 
+                  $signed(products[2]) + $signed(products[3]) + 
+                  $signed(rd_i);
+  end
   
   always_comb begin
     result_comb = '0;
@@ -101,6 +132,14 @@ module int8_mac_unit
         valid_comb = 1'b1;
         we_comb    = 1'b1;
       end
+
+      SIMD_DOT: begin
+        result_comb = dot_product;
+        valid_comb  = 1'b1;
+        we_comb     = 1'b1;
+        // No saturation on 32-bit accumulation for now
+        overflow_comb = 1'b0; 
+      end
       
       default: begin
         result_comb = '0;
@@ -143,7 +182,7 @@ module int8_mac_unit
   // Check that opcode is valid
   property p_valid_opcode;
     @(posedge clk_i) disable iff (!rst_ni)
-    (opcode_i inside {MAC8, MAC8_ACC, MUL8, CLIP8, ILLEGAL});
+    (opcode_i inside {MAC8, MAC8_ACC, MUL8, CLIP8, SIMD_DOT, ILLEGAL});
   endproperty
   assert property (p_valid_opcode) else $error("Invalid opcode received");
   

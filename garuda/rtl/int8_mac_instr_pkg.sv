@@ -8,7 +8,8 @@ package int8_mac_instr_pkg;
     MAC8     = 4'b0001,  // INT8 MAC with 8-bit accumulator
     MAC8_ACC = 4'b0010,  // INT8 MAC with 32-bit accumulator
     MUL8     = 4'b0011,  // INT8 multiply
-    CLIP8    = 4'b0100   // Saturate to INT8 range
+    CLIP8    = 4'b0100,  // Saturate to INT8 range
+    SIMD_DOT = 4'b0101   // 4-element SIMD Dot Product
   } opcode_t;
 
   typedef struct packed {
@@ -35,7 +36,7 @@ package int8_mac_instr_pkg;
     compressed_resp_t resp;
   } copro_compressed_resp_t;
 
-  parameter int unsigned NbInstr = 4;
+  parameter int unsigned NbInstr = 5;
   
   // Instruction encodings using custom-3 opcode (0x7B)
   parameter copro_issue_resp_t CoproInstr[NbInstr] = '{
@@ -69,6 +70,15 @@ package int8_mac_instr_pkg;
           mask:  32'b1111111_11111_00000_111_00000_1111111,
           resp: '{accept: 1'b1, writeback: 1'b1, register_read: 3'b001},
           opcode: CLIP8
+      },
+
+      // SIMD_DOT: rd = dot_product(rs1[31:0], rs2[31:0]) + rd
+      // Performs 4x INT8 multiplies and adds to 32-bit accumulator
+      '{
+          instr: 32'b0000100_00000_00000_000_00000_1111011,
+          mask:  32'b1111111_00000_00000_111_00000_1111111,
+          resp: '{accept: 1'b1, writeback: 1'b1, register_read: 3'b011},
+          opcode: SIMD_DOT
       }
   };
 
@@ -84,6 +94,7 @@ package int8_mac_instr_pkg;
       MAC8_ACC: return "MAC8.ACC";
       MUL8:     return "MUL8";
       CLIP8:    return "CLIP8";
+      SIMD_DOT: return "SIMD_DOT";
       ILLEGAL:  return "ILLEGAL";
       default:  return "UNKNOWN";
     endcase
