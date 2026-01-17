@@ -3,6 +3,7 @@ helper-files/
 
 # Simulation artifacts
 obj_dir/
+*.vvp
 *.vcd
 *.wdb
 *.fsdb
@@ -43,4 +44,7 @@ Thumbs.db
 *.tmp
 *.bak
 *.orig
+
+# Markdown docs (keep READMEs only)
+mdfiles/
 

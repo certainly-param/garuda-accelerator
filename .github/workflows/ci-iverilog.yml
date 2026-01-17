@@ -1,0 +1,141 @@
+name: ci-iverilog
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  iverilog-sims:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Icarus Verilog
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iverilog
+
+      - name: Run Icarus simulations
+        run: |
+          bash ci/run_iverilog_sims.sh | tee ci/iverilog_sims.log
+
+      - name: Yosys synthesis stats (non-blocking)
+        continue-on-error: true
+        id: yosys_synth
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y yosys bc
+          echo "== Yosys version ==" | tee ci/yosys_stat.log
+          yosys -V | head -n 1 | tee -a ci/yosys_stat.log
+          echo | tee -a ci/yosys_stat.log
+          # Define clock period for timing analysis (100 MHz = 10 ns)
+          CLOCK_PERIOD=10
+          
+          # register_rename_table
+          echo "== register_rename_table (synth stat + timing) ==" | tee -a ci/yosys_stat.log
+          yosys -p "read_verilog -sv garuda/rtl/register_rename_table.sv; synth -top register_rename_table; clock -period ${CLOCK_PERIOD} clk_i; check; stat" 2>&1 | tee -a ci/yosys_stat.log | tee ci/yosys_rr_full.log | bash ci/parse_yosys_stats.sh register_rename_table > ci/yosys_rr.txt || true
+          cat ci/yosys_rr_full.log | bash ci/parse_yosys_timing.sh register_rename_table >> ci/yosys_rr.txt || true
+          
+          echo | tee -a ci/yosys_stat.log
+          echo "== systolic_array (synth stat + timing) ==" | tee -a ci/yosys_stat.log
+          yosys -p "read_verilog -sv garuda/rtl/systolic_array.sv; synth -top systolic_array; clock -period ${CLOCK_PERIOD} clk_i; check; stat" 2>&1 | tee -a ci/yosys_stat.log | tee ci/yosys_sa_full.log | bash ci/parse_yosys_stats.sh systolic_array > ci/yosys_sa.txt || true
+          cat ci/yosys_sa_full.log | bash ci/parse_yosys_timing.sh systolic_array >> ci/yosys_sa.txt || true
+          
+          echo | tee -a ci/yosys_stat.log
+          echo "== int8_mac_unit (synth stat + timing) ==" | tee -a ci/yosys_stat.log
+          yosys -p "read_verilog -sv garuda/rtl/int8_mac_instr_pkg.sv garuda/rtl/int8_mac_unit.sv; synth -top int8_mac_unit; clock -period ${CLOCK_PERIOD} clk_i; check; stat" 2>&1 | tee -a ci/yosys_stat.log | tee ci/yosys_mac_full.log | bash ci/parse_yosys_stats.sh int8_mac_unit > ci/yosys_mac.txt || true
+          cat ci/yosys_mac_full.log | bash ci/parse_yosys_timing.sh int8_mac_unit >> ci/yosys_mac.txt || true
+          
+          echo | tee -a ci/yosys_stat.log
+          echo "== attention_microkernel_engine (synth stat + timing) ==" | tee -a ci/yosys_stat.log
+          yosys -p "read_verilog -sv garuda/rtl/attention_microkernel_engine.sv; synth -top attention_microkernel_engine; clock -period ${CLOCK_PERIOD} clk_i; check; stat" 2>&1 | tee -a ci/yosys_stat.log | tee ci/yosys_att_full.log | bash ci/parse_yosys_stats.sh attention_microkernel_engine > ci/yosys_att.txt || true
+          cat ci/yosys_att_full.log | bash ci/parse_yosys_timing.sh attention_microkernel_engine >> ci/yosys_att.txt || true
+          
+          # Extract numbers for summary
+          if [ -f ci/yosys_att.txt ]; then
+            source ci/yosys_att.txt
+            echo "att_cells=${attention_microkernel_engine_CELLS:-N/A}" >> $GITHUB_OUTPUT
+            echo "att_wires=${attention_microkernel_engine_WIRES:-N/A}" >> $GITHUB_OUTPUT
+            echo "att_wire_bits=${attention_microkernel_engine_WIRE_BITS:-N/A}" >> $GITHUB_OUTPUT
+            echo "att_freq=${attention_microkernel_engine_EST_FREQ_MHZ:-N/A}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload sim log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iverilog_sims_log
+          path: ci/iverilog_sims.log
+
+      - name: Upload yosys stat
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yosys_stat
+          path: ci/yosys_stat.log
+
+      - name: Verified (job summary)
+        if: always()
+        run: |
+          {
+            echo "## Verified (Icarus sims)"
+            echo
+            echo "| Testbench | Command | Result |"
+            echo "|---|---|---|"
+            echo "| \`tb_register_rename_table.sv\` | \`iverilog -g2012 ... && vvp\` | $([[ \"${{ job.status }}\" == \"success\" ]] && echo PASS || echo FAIL) |"
+            echo "| \`tb_systolic_array.sv\` | \`iverilog -g2012 ... && vvp\` | $([[ \"${{ job.status }}\" == \"success\" ]] && echo PASS || echo FAIL) |"
+            echo "| \`tb_multi_issue_rename_integration.sv\` | \`iverilog -g2012 ... && vvp\` | $([[ \"${{ job.status }}\" == \"success\" ]] && echo PASS || echo FAIL) |"
+            echo "| \`tb_attention_microkernel_latency.sv\` | \`iverilog -g2012 ... && vvp\` | $([[ \"${{ job.status }}\" == \"success\" ]] && echo PASS || echo FAIL) |"
+            echo
+            echo "**Icarus version**:"
+            echo
+            echo "\`\`\`"
+            iverilog -V | head -n 1
+            echo "\`\`\`"
+            echo
+            echo "**Log**: uploaded as artifact \`iverilog_sims_log\`"
+            echo
+            echo "## Synthesis stats (Yosys, best-effort)"
+            echo
+            echo "*Clock constraint: 100 MHz (10 ns period)*"
+            echo
+            
+            # Helper function to print module stats with timing
+            print_module_stats() {
+              local file=$1
+              local var_prefix=$2
+              local display_name=$3
+              
+              if [ -f "$file" ]; then
+                source "$file"
+                echo "### ${display_name}"
+                echo
+                echo "| Metric | Value |"
+                echo "|---|---|"
+                eval echo "| Cells (LUTs/Logic) | \${${var_prefix}_CELLS:-N/A} |"
+                eval echo "| Wires | \${${var_prefix}_WIRES:-N/A} |"
+                eval echo "| Wire bits | \${${var_prefix}_WIRE_BITS:-N/A} |"
+                # Timing metrics
+                eval critical_path="\${${var_prefix}_CRITICAL_PATH_NS:-}"
+                eval freq="\${${var_prefix}_EST_FREQ_MHZ:-}"
+                eval violations="\${${var_prefix}_TIMING_VIOLATIONS:-}"
+                if [ -n "$critical_path" ] && [ "$critical_path" != "" ] && [ "$critical_path" != "N/A" ]; then
+                  eval echo "| Critical path | \${${var_prefix}_CRITICAL_PATH_NS} ns |"
+                fi
+                if [ -n "$freq" ] && [ "$freq" != "" ] && [ "$freq" != "N/A" ]; then
+                  eval echo "| Est. max freq | \${${var_prefix}_EST_FREQ_MHZ} MHz |"
+                fi
+                if [ -n "$violations" ] && [ "$violations" != "" ] && [ "$violations" != "N/A" ]; then
+                  eval echo "| Timing violations | \${${var_prefix}_TIMING_VIOLATIONS} |"
+                fi
+                echo
+              fi
+            }
+            
+            print_module_stats ci/yosys_rr.txt register_rename_table "register_rename_table"
+            print_module_stats ci/yosys_att.txt attention_microkernel_engine "attention_microkernel_engine (latency mode)"
+            print_module_stats ci/yosys_mac.txt int8_mac_unit "int8_mac_unit"
+            print_module_stats ci/yosys_sa.txt systolic_array "systolic_array"
+            echo "- Full log: uploaded as artifact \`yosys_stat\`"
+          } >> "$GITHUB_STEP_SUMMARY"
