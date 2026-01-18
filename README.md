@@ -1,24 +1,45 @@
 # Garuda: RISC-V ML Accelerator
 
-> *Swift as the divine eagle, Garuda accelerates RISC-V with specialized hardware for neural network inference.*
+> **7.5-9× lower tail latency for batch-1 attention microkernels** — A CVXIF coprocessor that extends RISC-V with custom INT8 MAC instructions, optimized for transformer inference on on-SoC deployments.
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![ci-iverilog](https://github.com/certainly-param/garuda-accelerator/actions/workflows/ci-iverilog.yml/badge.svg)](https://github.com/certainly-param/garuda-accelerator/actions/workflows/ci-iverilog.yml)
+[![CI](https://github.com/certainly-param/garuda-accelerator/actions/workflows/ci-iverilog.yml/badge.svg)](https://github.com/certainly-param/garuda-accelerator/actions/workflows/ci-iverilog.yml)
 [![RISC-V](https://img.shields.io/badge/RISC--V-CVXIF-green.svg)](https://github.com/openhwgroup/core-v-xif)
-[![Status](https://img.shields.io/badge/Status-Active%20Development-orange.svg)]()
+[![SystemVerilog](https://img.shields.io/badge/SystemVerilog-2012-orange.svg)]()
+[![Testbenches](https://img.shields.io/badge/Testbenches-4%20PASSING-brightgreen.svg)]()
+[![Synthesis](https://img.shields.io/badge/Synthesis-Yosys%20CI-yellow.svg)]()
+
+## What is Garuda?
+
+**Garuda** is a CVXIF coprocessor that extends RISC-V with custom INT8 multiply-accumulate (MAC) instructions for efficient neural network inference. Unlike throughput-oriented accelerators that require batching, Garuda optimizes for **batch-1 tail latency** (p99), making it ideal for real-time transformer inference, voice assistants, and local LLM attention workloads.
+
+**Key advantage**: Achieves **7.5-9× latency reduction** vs baseline CPU-style loops (p99: 307→34 cycles) for attention dot products while maintaining competitive throughput for larger dense layers.
+
+### Quick Start
+
+```bash
+# Clone and setup
+git clone https://github.com/certainly-param/garuda-accelerator.git
+cd garuda-accelerator
+
+# Install Icarus Verilog (Ubuntu: sudo apt-get install iverilog)
+
+# Run a simulation
+iverilog -g2012 -o sim_test.vvp garuda/tb/tb_attention_microkernel_latency.sv garuda/rtl/attention_microkernel_engine.sv
+vvp sim_test.vvp
+```
+
+**Ready in 3 commands.** See [Getting Started](#getting-started) for detailed setup.
 
 ---
 
-## Overview
+## Why Garuda?
 
-**Garuda** is a CVXIF coprocessor that extends RISC-V with custom INT8 multiply-accumulate (MAC) instructions for efficient neural network inference. The modular design integrates with CVA6 without CPU modifications, achieving 2-5× speedup over software implementations.
-
-### Why Garuda?
-
-- **Standard Interface**: CVXIF protocol enables integration without CPU modifications
-- **Low Latency**: Optimized for batch-1 attention microkernels (7.5-9× faster than baseline)
-- **High Throughput**: SIMD_DOT instruction provides 4× speedup vs scalar operations
-- **Modular Design**: Stateless architecture supports speculative execution
+- **Low tail latency**: 7.5-9× faster p99 latency for batch-1 attention microkernels (307→34 cycles)
+- **Standard integration**: CVXIF protocol — no CPU modifications required
+- **High throughput**: SIMD_DOT instruction provides 4× speedup vs scalar operations
+- **On-SoC optimized**: Designed for cache-coherent integration next to RISC-V CPU cores
+- **Verified**: Continuous integration with automated testbenches and synthesis
 
 ---
 
@@ -26,7 +47,7 @@
 
 ### Latency Performance (Attention Microkernel)
 
-**Workload**: Q·K dot product (K=128 INT8 elements = 32 words × 4 INT8/word)
+**Workload**: Q·K dot product (K=128 INT8 elements = 32 words × 4 INT8/word) — single-head attention score computation
 
 | Metric | Baseline (CPU-style) | Garuda Microkernel | Improvement |
 |---|---:|---:|---:|
@@ -35,6 +56,8 @@
 | p99 latency | 307 cycles | 34 cycles | **9.0×** |
 
 *Measured via `tb_attention_microkernel_latency.sv` (1000 trials, Icarus simulation). Baseline models CPU-style loop with dispatch jitter; microkernel uses deterministic internal loop.*
+
+**Why this matters**: Lower tail latency (p99) is critical for real-time applications. Garuda's microkernel engine eliminates dispatch overhead by running the dot-product loop internally, achieving deterministic, predictable latency.
 
 ### Architectural Peak Performance
 
@@ -378,12 +401,13 @@ yosys -p "synth_xilinx -top int8_mac_unit -flatten; write_json output.json" \
 
 ## Contributing
 
-Contributions are welcome. Areas of interest:
-- RTL improvements and optimizations
-- Testbench enhancements
-- Software examples and benchmarks
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on:
+- Development setup and coding standards
+- Submitting pull requests
+- Adding testbenches and verification
 - Documentation improvements
-- Performance analysis and benchmarking
+
+**Good first issues**: Check GitHub Issues tagged with `good first issue` for beginner-friendly tasks.
 
 ---
 
@@ -400,9 +424,20 @@ Contributions are welcome. Areas of interest:
 
 ---
 
+## Use Cases
+
+- **Real-time transformer inference**: Voice assistants, local LLM attention mechanisms
+- **Edge AI**: Resource-constrained devices requiring low-latency inference
+- **Research & Education**: RISC-V accelerator development, custom instruction set design
+- **Hardware startups**: Foundation for specialized ML coprocessor products
+
+---
+
 ## Contact & Community
 
-- **GitHub Issues:** Bug reports and feature requests
+- **GitHub Issues**: Bug reports and feature requests
+- **Contributing**: See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines
+- **License**: Apache 2.0 (see [LICENSE](LICENSE) for details)
 
 ---
 
