@@ -13,7 +13,7 @@
 
 **Garuda** is a CVXIF coprocessor that extends RISC-V with custom INT8 multiply-accumulate (MAC) instructions for efficient neural network inference. Unlike throughput-oriented accelerators that require batching, Garuda optimizes for **batch-1 tail latency** (p99), making it ideal for real-time transformer inference, voice assistants, and local LLM attention workloads.
 
-**Key advantage**: Achieves **7.5-9× latency reduction** vs baseline CPU-style loops (p99: 307→34 cycles) for attention dot products while maintaining competitive throughput for larger dense layers.
+**Key advantage**: Achieves **7.5-9× latency reduction** vs. modeled baseline (CPU-style SIMD_DOT with dispatch jitter) for attention dot products (p99: 307→34 cycles) while maintaining competitive throughput for larger dense layers. *Industry comparisons pending FPGA/ASIC implementation.*
 
 ### Quick Start
 
@@ -35,7 +35,7 @@ vvp sim_test.vvp
 
 ## Why Garuda?
 
-- **Low tail latency**: 7.5-9× faster p99 latency for batch-1 attention microkernels (307→34 cycles)
+- **Low tail latency**: 7.5-9× faster p99 latency vs. modeled baseline for batch-1 attention microkernels (307→34 cycles)
 - **Standard integration**: CVXIF protocol — no CPU modifications required
 - **High throughput**: SIMD_DOT instruction provides 4× speedup vs scalar operations
 - **On-SoC optimized**: Designed for cache-coherent integration next to RISC-V CPU cores
@@ -49,13 +49,15 @@ vvp sim_test.vvp
 
 **Workload**: Q·K dot product (K=128 INT8 elements = 32 words × 4 INT8/word) — single-head attention score computation
 
-| Metric | Baseline (CPU-style) | Garuda Microkernel | Improvement |
+| Metric | Baseline (Modeled CPU-style) | Garuda Microkernel | Improvement |
 |---|---:|---:|---:|
 | p50 latency | 256 cycles | 34 cycles | **7.5×** |
 | p95 latency | 291 cycles | 34 cycles | **8.6×** |
 | p99 latency | 307 cycles | 34 cycles | **9.0×** |
 
-*Measured via `tb_attention_microkernel_latency.sv` (1000 trials, Icarus simulation). Baseline models CPU-style loop with dispatch jitter; microkernel uses deterministic internal loop.*
+*Measured via `tb_attention_microkernel_latency.sv` (1000 trials, Icarus simulation). Baseline models CPU-style SIMD_DOT loop with dispatch jitter (0-12 cycle random bubbles); microkernel uses deterministic internal loop.*
+
+**Methodology note**: The baseline is a *modeled* CPU-style implementation (theoretical dispatch overhead), not measured hardware. Industry comparisons against real RISC-V CPUs (CVA6, Rocket, BOOM) and other accelerators require FPGA/ASIC implementation and will be published as future work.
 
 **Why this matters**: Lower tail latency (p99) is critical for real-time applications. Garuda's microkernel engine eliminates dispatch overhead by running the dot-product loop internally, achieving deterministic, predictable latency.
 
@@ -399,6 +401,48 @@ yosys -p "synth_xilinx -top int8_mac_unit -flatten; write_json output.json" \
 
 ---
 
+## Future Work
+
+The following enhancements are planned to validate Garuda's performance against industry standards:
+
+- **FPGA Integration with CVA6 CPU**: Full integration of Garuda with CVA6 on FPGA (e.g., Xilinx Zynq-7000) to measure end-to-end latency with real CPU interaction, cache coherence, and memory hierarchy.
+- **MLPerf Inference Benchmarks**: Submission to MLPerf Inference benchmark suite to compare against published accelerator results (TPU, Tensor Cores, etc.) using standardized workloads and metrics.
+- **Comparison Against Published Accelerator Numbers**: Quantitative comparison against cycle-accurate models and published results from:
+  - Google TPU (attention microkernel latency)
+  - NVIDIA Tensor Cores (small-batch dot products)
+  - Apple Neural Engine (transformer inference)
+  - Open-source RISC-V accelerators (Snitch, NVDLA on RISC-V)
+- **ASIC Implementation**: Synthesis to ASIC process node (e.g., TSMC 28nm or 7nm) for area, power, and timing analysis with target-specific optimizations.
+- **Full Transformer End-to-End Benchmark**: Measure complete attention layer latency (Q·K·V with softmax) and compare against software baselines on real hardware.
+
+---
+
+## Related Work
+
+Garuda builds upon research in low-latency neural network accelerators and attention mechanism optimization. Related approaches include:
+
+**Attention Accelerators:**
+- **Spatial Accelerators**: Systolic arrays (TPU-style) excel at large-batch GEMMs but suffer from underutilization for small-batch attention queries. Garuda addresses this with fused microkernel instructions that eliminate dispatch overhead.
+- **In-Memory Computing**: PIM (Processing-In-Memory) accelerators reduce memory bandwidth but introduce latency from memory access patterns. Garuda's operand staging provides cache-hot access for low-latency loops.
+- **Multi-Head Attention Optimization**: Prior work optimizes multi-head parallelism; Garuda focuses on single-head tail latency for real-time applications where head-level parallelism may be limited.
+
+**RISC-V Accelerator Extensions:**
+- **CVXIF Coprocessors**: Standard CVXIF interface enables modular accelerator design; Garuda extends this with attention-specific fused operations (`ATT_DOT_*` instructions).
+- **Register Renaming**: Multi-issue support via rename table enables 4-wide instruction issue, similar to modern out-of-order CPUs, but tailored for deterministic coprocessor execution.
+
+**What Makes Garuda Different:**
+- **Batch-1 Tail Latency Focus**: Unlike throughput-oriented accelerators, Garuda explicitly optimizes p99 latency for small-batch workloads (batch=1), making it suitable for real-time inference.
+- **Fused Attention Microkernels**: Custom instructions (`ATT_DOT_SETUP`, `ATT_DOT_RUN`, `ATT_DOT_RUN_SCALE`, `ATT_DOT_RUN_CLIP`) combine loop control, scaling, and clipping into single-instruction operations, minimizing dispatch overhead.
+- **Deterministic Execution**: Internal loop execution within the microkernel engine eliminates variance from CPU dispatch jitter, providing predictable latency for real-time applications.
+
+**Key Publications:**
+- Attention mechanism acceleration: "Attention Is All You Need" (Vaswani et al., 2017) — foundation for transformer architectures
+- Low-latency inference: "MobileNets: Efficient Convolutional Neural Networks for Mobile Vision" (Howard et al., 2017) — mobile-optimized architectures
+- Systolic arrays: "In-Datacenter Performance Analysis of a Tensor Processing Unit" (Jouppi et al., 2017) — TPU architecture and trade-offs
+- RISC-V extensions: "The RISC-V Instruction Set Manual" — custom instruction extensions via CVXIF
+
+---
+
 ## Contributing
 
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on:
@@ -421,6 +465,14 @@ Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines
 **Neural Network Quantization:**
 - [Quantization and Training of Neural Networks](https://arxiv.org/abs/1712.05877)
 - [Survey of Quantization Methods](https://arxiv.org/abs/2103.13630)
+
+**Attention Mechanisms & Accelerators:**
+- [Attention Is All You Need (Vaswani et al., 2017)](https://arxiv.org/abs/1706.03762) — Transformer architecture foundation
+- [In-Datacenter Performance Analysis of a Tensor Processing Unit (Jouppi et al., 2017)](https://arxiv.org/abs/1704.04760) — TPU architecture and systolic arrays
+- [MobileNets: Efficient Convolutional Neural Networks for Mobile Vision (Howard et al., 2017)](https://arxiv.org/abs/1704.04861) — Mobile-optimized architectures
+
+**Benchmarks:**
+- [MLPerf Inference Benchmark](https://mlcommons.org/en/inference-edge-11/) — Standardized ML inference benchmarks
 
 ---
 
