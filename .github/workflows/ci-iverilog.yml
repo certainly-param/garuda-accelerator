@@ -113,21 +113,24 @@ jobs:
                 echo
                 echo "| Metric | Value |"
                 echo "|---|---|"
-                eval echo "| Cells (LUTs/Logic) | \${${var_prefix}_CELLS:-N/A} |"
-                eval echo "| Wires | \${${var_prefix}_WIRES:-N/A} |"
-                eval echo "| Wire bits | \${${var_prefix}_WIRE_BITS:-N/A} |"
+                eval "cells_val=\${${var_prefix}_CELLS:-N/A}"
+                eval "wires_val=\${${var_prefix}_WIRES:-N/A}"
+                eval "wire_bits_val=\${${var_prefix}_WIRE_BITS:-N/A}"
+                echo "| Cells (LUTs/Logic) | ${cells_val} |"
+                echo "| Wires | ${wires_val} |"
+                echo "| Wire bits | ${wire_bits_val} |"
                 # Timing metrics
-                eval critical_path="\${${var_prefix}_CRITICAL_PATH_NS:-}"
-                eval freq="\${${var_prefix}_EST_FREQ_MHZ:-}"
-                eval violations="\${${var_prefix}_TIMING_VIOLATIONS:-}"
+                eval "critical_path=\${${var_prefix}_CRITICAL_PATH_NS:-}"
+                eval "freq=\${${var_prefix}_EST_FREQ_MHZ:-}"
+                eval "violations=\${${var_prefix}_TIMING_VIOLATIONS:-}"
                 if [ -n "$critical_path" ] && [ "$critical_path" != "" ] && [ "$critical_path" != "N/A" ]; then
-                  eval echo "| Critical path | \${${var_prefix}_CRITICAL_PATH_NS} ns |"
+                  echo "| Critical path | ${critical_path} ns |"
                 fi
                 if [ -n "$freq" ] && [ "$freq" != "" ] && [ "$freq" != "N/A" ]; then
-                  eval echo "| Est. max freq | \${${var_prefix}_EST_FREQ_MHZ} MHz |"
+                  echo "| Est. max freq | ${freq} MHz |"
                 fi
                 if [ -n "$violations" ] && [ "$violations" != "" ] && [ "$violations" != "N/A" ]; then
-                  eval echo "| Timing violations | \${${var_prefix}_TIMING_VIOLATIONS} |"
+                  echo "| Timing violations | ${violations} |"
                 fi
                 echo
               fi
