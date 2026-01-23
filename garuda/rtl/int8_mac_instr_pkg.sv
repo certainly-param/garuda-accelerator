@@ -15,10 +15,10 @@ package int8_mac_instr_pkg;
 
     // Attention-oriented microkernel ops (latency mode)
     // NOTE: encodings are reserved under custom-3 (0x7B) for future CVXIF integration.
-    ATT_DOT_SETUP     = 4'b1000,  // Configure dot microkernel (K, scale/clip params, etc.)
-    ATT_DOT_RUN       = 4'b1001,  // Run dot microkernel (baseline acc32)
-    ATT_DOT_RUN_SCALE = 4'b1010,  // Run + apply scale/shift
-    ATT_DOT_RUN_CLIP  = 4'b1011   // Run + apply clamp
+    ATT_DOT_SETUP     = 4'b1000,  // Configure dot microkernel (K from rs1[7:0], scale from rs2[15:0], shift from rs1[11:8], clip from rd/rs2)
+    ATT_DOT_RUN       = 4'b1001,  // Stage operands and run baseline dot: rs1=Q_word, rs2=K_word (stages if not full), then executes if all staged
+    ATT_DOT_RUN_SCALE = 4'b1010,  // Run + apply scale/shift (same as RUN but with scale enabled)
+    ATT_DOT_RUN_CLIP  = 4'b1011   // Run + apply clamp (same as RUN but with clip enabled)
   } opcode_t;
 
   typedef struct packed {
@@ -111,10 +111,28 @@ package int8_mac_instr_pkg;
       },
 
       // ---------------------------------------------------------------------
-      // Attention microkernel placeholders (reserved encodings)
+      // Attention microkernel instructions (low-latency dot product)
       // ---------------------------------------------------------------------
-
-      // ATT_DOT_SETUP: configure parameters (no writeback)
+      
+      // Instruction encoding format:
+      // All ATT_DOT_* instructions use custom-3 opcode (0x7B)
+      // Bits [31:25] = funct7 (distinguishes instruction type)
+      // Bits [24:20] = rs2
+      // Bits [19:15] = rs1
+      // Bits [14:12] = funct3 (unused/reserved)
+      // Bits [11:7]  = rd
+      // Bits [6:0]   = opcode (0x7B = custom-3)
+      
+      // ATT_DOT_SETUP: configure microkernel engine parameters
+      // Encoding: 32'b0000111_rs2_rs1_000_rd_1111011
+      // rs1[7:0]    = K (number of int8 elements, must be multiple of 4, max 256)
+      // rs1[11:8]   = shift (right shift amount, 0-15, applied after scaling)
+      // rs2[15:0]   = scale (Q8.8 fixed-point multiplier, signed 16-bit)
+      // rs2[31:16]  = unused (reserved)
+      // rd          = unused (no writeback)
+      // Note: clip_min/clip_max currently default to -32768/32767 (can be extended to use rd/rs2)
+      //       Configuration persists until next ATT_DOT_SETUP
+      //       Must be called before ATT_DOT_RUN* instructions
       '{
           instr: 32'b0000111_00000_00000_000_00000_1111011,
           mask:  32'b1111111_00000_00000_111_00000_1111111,
@@ -122,7 +140,19 @@ package int8_mac_instr_pkg;
           opcode: ATT_DOT_SETUP
       },
 
-      // ATT_DOT_RUN: run baseline dot (writeback)
+      // ATT_DOT_RUN: stage operands and execute (baseline dot product, no post-ops)
+      // Encoding: 32'b0001000_rs2_rs1_000_rd_1111011
+      // rs1[31:0] = Q_word (packed 4× int8, Q vector word)
+      // rs2[31:0] = K_word (packed 4× int8, K vector word)
+      // rd        = destination register for result
+      // Operation:
+      //   1. Stages Q_word and K_word into internal buffers at current word index
+      //   2. If all words staged (K/4 words), triggers execution
+      //   3. Computes dot product: sum(Q[i] * K[i] for i in 0..K-1)
+      //   4. Result: 32-bit signed accumulator (no scaling/clipping)
+      // Note: Multiple ATT_DOT_RUN instructions may be needed to stage all operands
+      //       (one instruction per 4-element word pair)
+      //       Execution occurs automatically when all operands are staged
       '{
           instr: 32'b0001000_00000_00000_000_00000_1111011,
           mask:  32'b1111111_00000_00000_111_00000_1111111,
@@ -130,7 +160,15 @@ package int8_mac_instr_pkg;
           opcode: ATT_DOT_RUN
       },
 
-      // ATT_DOT_RUN_SCALE: run dot + scale/shift (writeback)
+      // ATT_DOT_RUN_SCALE: stage operands and execute with scaling
+      // Encoding: 32'b0001001_rs2_rs1_000_rd_1111011
+      // rs1[31:0] = Q_word (packed 4× int8, Q vector word)
+      // rs2[31:0] = K_word (packed 4× int8, K vector word)
+      // rd        = destination register for result
+      // Operation: Same as ATT_DOT_RUN, but applies post-op scaling:
+      //   result = (dot_product * scale) >> (8 + shift)
+      //   where scale and shift come from previous ATT_DOT_SETUP
+      //   This enables attention score normalization (e.g., 1/sqrt(d_k))
       '{
           instr: 32'b0001001_00000_00000_000_00000_1111011,
           mask:  32'b1111111_00000_00000_111_00000_1111111,
@@ -138,10 +176,19 @@ package int8_mac_instr_pkg;
           opcode: ATT_DOT_RUN_SCALE
       },
 
-      // ATT_DOT_RUN_CLIP: run dot + clamp (writeback)
+      // ATT_DOT_RUN_CLIP: stage operands and execute with scaling and clipping
+      // Encoding: 32'b0001010_rs2_rs1_000_rd_1111011
+      // rs1[31:0] = Q_word (packed 4× int8, Q vector word)
+      // rs2[31:0] = K_word (packed 4× int8, K vector word)
+      // rd        = destination register for result
+      // Operation: Same as ATT_DOT_RUN_SCALE, but also applies clipping:
+      //   scaled = (dot_product * scale) >> (8 + shift)
+      //   result = clamp(scaled, clip_min, clip_max)
+      //   where clip_min/clip_max come from previous ATT_DOT_SETUP (or defaults)
+      //   This enables softmax input clamping for numerical stability
       '{
           instr: 32'b0001010_00000_00000_000_00000_1111011,
-          mask:  32'b1111111_00000_00000_111_00000_1111111,
+          mask:  32'b1111111_00000_00000_111_00000_1111011,
           resp: '{accept: 1'b1, writeback: 1'b1, register_read: 3'b011},
           opcode: ATT_DOT_RUN_CLIP
       }

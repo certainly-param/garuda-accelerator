@@ -1,0 +1,380 @@
+# Makefile for CVA6 + Garuda Integration Testbench
+# Supports multiple simulators: QuestaSim, VCS, Verilator, Icarus Verilog
+# Usage: make SIM=questa compile  (or make SIM=vcs compile, etc.)
+
+# Simulator selection (questa, vcs, verilator, iverilog)
+SIM ?= questa
+
+# Directories
+INTEGRATION_DIR := .
+ROOT := ..
+GARUDA_RTL := $(ROOT)/garuda/rtl
+CVA6_CORE := $(ROOT)/cva6/core
+CVA6_INCLUDE := $(CVA6_CORE)/include
+CVA6_VENDOR := $(ROOT)/cva6/vendor/pulp-platform
+
+# CVA6 configuration
+CVA6_REPO_DIR := $(ROOT)/cva6
+TARGET_CFG := cv32a60x
+PYTHON := python3
+ifeq ($(shell $(PYTHON) --version 2>&1),)
+PYTHON := python
+endif
+
+# CVA6 file extraction
+CVA6_FILES_SCRIPT := extract_cva6_files.py
+CVA6_FILES_LIST := cva6_files.list
+CVA6_FILES := $(shell $(PYTHON) $(CVA6_FILES_SCRIPT) $(CVA6_REPO_DIR) $(TARGET_CFG) $(CVA6_FILES_LIST) 2>nul)
+
+# CVA6 include directories
+CVA6_INCDIRS := \
+	$(CVA6_INCLUDE) \
+	$(CVA6_VENDOR)/common_cells/include \
+	$(CVA6_VENDOR)/common_cells/src \
+	$(CVA6_VENDOR)/axi/include \
+	$(CVA6_REPO_DIR)/common/local/util \
+	$(CVA6_REPO_DIR)/core/cache_subsystem/hpdcache/rtl/include
+
+# RTL files
+GARUDA_FILES := \
+	$(GARUDA_RTL)/int8_mac_instr_pkg.sv \
+	$(GARUDA_RTL)/int8_mac_decoder.sv \
+	$(GARUDA_RTL)/int8_mac_unit.sv \
+	$(GARUDA_RTL)/int8_mac_coprocessor.sv \
+	$(GARUDA_RTL)/attention_microkernel_engine.sv
+
+INTEGRATION_FILES := \
+	$(INTEGRATION_DIR)/memory_model.sv \
+	$(INTEGRATION_DIR)/system_top.sv
+
+# Note: tb_system_top.sv is passed separately as --top-module, so not included in ALL_FILES
+ALL_FILES := $(GARUDA_FILES) $(CVA6_FILES) $(INTEGRATION_FILES)
+
+# ============================================================================
+# QuestaSim (Mentor Graphics) Configuration
+# ============================================================================
+ifeq ($(SIM),questa)
+VLIB := vlib
+VLOG := vlog
+VOPT := vopt
+VSIM := vsim
+WORK := work
+SIM_OUTPUT := $(WORK)/tb_system_top
+VCD_OUTPUT := tb_system_top.vcd
+
+COMPILE_FLAGS := -64 -sv -mfcu -cuname design_cuname +acc -access=rwc
+INC_FLAGS := $(foreach dir,$(CVA6_INCDIRS),+incdir+$(dir)) \
+	+incdir+$(INTEGRATION_DIR) \
+	+incdir+$(GARUDA_RTL) \
+	+define+TARGET_CFG=$(TARGET_CFG) \
+	+define+GARUDA_SIMPLE_PKG
+
+check-sim:
+	@$(VLOG) -version >nul 2>&1 || (echo "Error: QuestaSim not found. Set QUESTA_HOME or add vlog to PATH" && exit 1)
+	@$(VLOG) -version 2>&1 | $(PYTHON) -c "import sys; print('Using QuestaSim: ' + sys.stdin.readline().strip())"
+
+compile: extract-cva6-files
+	@echo "========================================="
+	@echo "Compiling CVA6 + Garuda (QuestaSim)"
+	@echo "========================================="
+	@$(PYTHON) -c "import os; os.makedirs('$(WORK)', exist_ok=True)" 2>nul
+	@if not exist $(WORK) $(VLIB) $(WORK)
+	@$(VLOG) $(COMPILE_FLAGS) $(INC_FLAGS) -work $(WORK) $(ALL_FILES) -writetoplevels $(WORK)/top.list -l compile.log
+	@$(VOPT) -64 -debug +designfile -f $(WORK)/top.list -work $(WORK) -o tb_system_top_opt tb_system_top -l optimize.log
+	@echo "Compilation successful: tb_system_top_opt"
+
+run: compile
+	@$(VSIM) -64 -c tb_system_top_opt -do "run -all; quit" -l run.log
+
+# ============================================================================
+# VCS (Synopsys) Configuration
+# ============================================================================
+else ifeq ($(SIM),vcs)
+VCS := vcs
+SIM_OUTPUT := simv
+VCD_OUTPUT := tb_system_top.vcd
+
+COMPILE_FLAGS := -full64 -sverilog +acc +v2k
+INC_FLAGS := $(foreach dir,$(CVA6_INCDIRS),+incdir+$(dir)) \
+	+incdir+$(INTEGRATION_DIR) \
+	+incdir+$(GARUDA_RTL) \
+	+define+TARGET_CFG=$(TARGET_CFG) \
+	+define+GARUDA_SIMPLE_PKG
+
+check-sim:
+	@$(VCS) -ID >nul 2>&1 || (echo "Error: VCS not found. Set VCS_HOME or add vcs to PATH" && exit 1)
+	@echo "Using VCS"
+
+compile: extract-cva6-files
+	@echo "========================================="
+	@echo "Compiling CVA6 + Garuda (VCS)"
+	@echo "========================================="
+	@$(VCS) $(COMPILE_FLAGS) $(INC_FLAGS) $(ALL_FILES) -Mdir=vcs_simv.csrc -o $(SIM_OUTPUT) -l compile.log
+	@echo "Compilation successful: $(SIM_OUTPUT)"
+
+run: compile
+	@./$(SIM_OUTPUT) -l run.log
+
+# ============================================================================
+# Verilator Configuration
+# ============================================================================
+else ifeq ($(SIM),verilator)
+VERILATOR := verilator
+SIM_OUTPUT := obj_dir/Vtb_system_top
+VCD_OUTPUT := tb_system_top.vcd
+
+# Auto-detect VERILATOR_ROOT
+# The verilator wrapper script looks for verilator_bin at VERILATOR_ROOT/verilator_bin or VERILATOR_ROOT/bin/verilator_bin
+ifeq ($(VERILATOR_ROOT),)
+# Try to find verilator_bin
+VERILATOR_BIN_PATH := $(shell \
+	find /usr /usr/local /opt -name verilator_bin 2>/dev/null | head -1)
+ifneq ($(VERILATOR_BIN_PATH),)
+# Determine VERILATOR_ROOT based on where verilator_bin actually is
+# Priority: use the location that actually contains the binary
+VERILATOR_ROOT := $(shell \
+	if echo "$(VERILATOR_BIN_PATH)" | grep -q '^/usr/bin/verilator_bin$$'; then \
+		# verilator_bin is at /usr/bin/verilator_bin \
+		# Check if /usr/share/verilator/bin/verilator_bin exists (standard location) \
+		if [ -f /usr/share/verilator/bin/verilator_bin ]; then \
+			echo /usr/share/verilator; \
+		else \
+			# Use /usr so wrapper finds /usr/bin/verilator_bin \
+			echo /usr; \
+		fi; \
+	elif echo "$(VERILATOR_BIN_PATH)" | grep -q '/bin/verilator_bin$$'; then \
+		# Standard structure: /path/to/verilator/bin/verilator_bin -> /path/to/verilator \
+		dirname "$(VERILATOR_BIN_PATH)" | sed 's|/bin$$||'; \
+	else \
+		# verilator_bin is in a non-standard location \
+		dirname "$(VERILATOR_BIN_PATH)"; \
+	fi)
+endif
+endif
+# Export VERILATOR_ROOT if we found it
+ifneq ($(VERILATOR_ROOT),)
+export VERILATOR_ROOT
+endif
+
+COMPILE_FLAGS := --cc --exe --build
+INC_FLAGS := $(foreach dir,$(CVA6_INCDIRS),-I$(dir)) \
+	-I$(INTEGRATION_DIR) \
+	-I$(GARUDA_RTL) \
+	-DTARGET_CFG=$(TARGET_CFG) \
+	-Wno-WIDTH \
+	-Wno-UNUSED \
+	-Wno-TIMESCALEMOD \
+	-Wno-REDEFMACRO \
+	-Wno-PINCONNECTEMPTY \
+	-Wno-SELRANGE
+
+check-sim:
+	@$(VERILATOR) --version >nul 2>&1 || (echo "Error: Verilator not found. Install with: sudo apt-get install verilator" && exit 1)
+	@$(VERILATOR) --version 2>&1 | $(PYTHON) -c "import sys; print('Using Verilator: ' + sys.stdin.readline().strip())"
+	@echo "Checking Verilator installation..."
+	@if ! $(VERILATOR) --version >/dev/null 2>&1; then \
+		echo "Error: Verilator installation appears incomplete."; \
+		echo "Try: sudo apt-get install --reinstall verilator"; \
+		exit 1; \
+	fi
+
+compile: extract-cva6-files
+	@echo "========================================="
+	@echo "Compiling CVA6 + Garuda (Verilator)"
+	@echo "========================================="
+	@echo "Note: Verilator compilation may take several minutes for 180+ files..."
+	@rm -f compile.log
+	@echo "Running Verilator command..."
+	@echo "VERILATOR_ROOT=$(if $(VERILATOR_ROOT),$(VERILATOR_ROOT),<auto-detect>)"
+	@# Workaround: If verilator_bin is at /usr/bin/verilator_bin but wrapper expects /usr/share/verilator/verilator_bin,
+	@# try to create the expected directory structure or use the binary directly
+	@if [ -f /usr/bin/verilator_bin ] && [ ! -f /usr/share/verilator/verilator_bin ]; then \
+		if [ -d /usr/share/verilator ] && [ -w /usr/share/verilator ] 2>/dev/null; then \
+			echo "Creating symlink: /usr/share/verilator/verilator_bin -> /usr/bin/verilator_bin"; \
+			ln -sf /usr/bin/verilator_bin /usr/share/verilator/verilator_bin 2>/dev/null || true; \
+		else \
+			echo "Warning: verilator_bin is at /usr/bin/verilator_bin but wrapper expects /usr/share/verilator/verilator_bin"; \
+			echo "Try: sudo ln -sf /usr/bin/verilator_bin /usr/share/verilator/verilator_bin"; \
+		fi; \
+	fi
+	@$(VERILATOR) $(COMPILE_FLAGS) --top-module tb_system_top $(INC_FLAGS) $(INTEGRATION_DIR)/tb_system_top.sv $(ALL_FILES) --binary -o Vtb_system_top >compile.log 2>&1; \
+	VERILATOR_EXIT=$$?; \
+	if [ $$VERILATOR_EXIT -ne 0 ]; then \
+		echo ""; \
+		echo "Compilation failed (exit code $$VERILATOR_EXIT). Showing last 50 lines:"; \
+		tail -50 compile.log; \
+		exit 1; \
+	else \
+		echo "Verilator compilation completed successfully"; \
+	fi
+	@echo "Compilation successful: obj_dir/Vtb_system_top"
+
+compile-debug: extract-cva6-files
+	@echo "========================================="
+	@echo "Compiling CVA6 + Garuda (Verilator) - DEBUG MODE"
+	@echo "========================================="
+	@echo "Note: Debug mode will produce more verbose output"
+	@rm -f compile.log
+	@echo "Running Verilator with --debug flag..."
+	@$(VERILATOR) $(COMPILE_FLAGS) --debug --top-module tb_system_top $(INC_FLAGS) $(INTEGRATION_DIR)/tb_system_top.sv $(ALL_FILES) --binary -o Vtb_system_top >compile.log 2>&1; \
+	VERILATOR_EXIT=$$?; \
+	if [ $$VERILATOR_EXIT -ne 0 ]; then \
+		echo ""; \
+		echo "Compilation failed (exit code $$VERILATOR_EXIT). Showing last 100 lines:"; \
+		tail -100 compile.log; \
+		echo ""; \
+		echo "Full log saved to compile.log"; \
+		exit 1; \
+	fi
+	@echo "Compilation successful: obj_dir/Vtb_system_top"
+
+dump-inputs: extract-cva6-files
+	@echo "========================================="
+	@echo "Generating preprocessed input"
+	@echo "========================================="
+	@echo "This will create obj_dir/Vtb_system_top__inputs.vpp"
+	@echo "Note: Using --debug flag to match bug reproduction conditions"
+	@echo ""
+	@rm -f compile.log
+	@echo "Running Verilator with --dump-inputs --debug flags..."
+	@$(VERILATOR) $(COMPILE_FLAGS) --debug --dump-inputs --top-module tb_system_top $(INC_FLAGS) $(INTEGRATION_DIR)/tb_system_top.sv $(ALL_FILES) --binary -o Vtb_system_top >compile.log 2>&1; \
+	VERILATOR_EXIT=$$?; \
+	if [ $$VERILATOR_EXIT -ne 0 ]; then \
+		echo ""; \
+		echo "Note: --dump-inputs may fail if compilation crashes, but the preprocessed file"; \
+		echo "      may still be generated. Check obj_dir/Vtb_system_top__inputs.vpp"; \
+		if [ -f obj_dir/Vtb_system_top__inputs.vpp ]; then \
+			echo ""; \
+			echo "✓ Preprocessed file found: obj_dir/Vtb_system_top__inputs.vpp"; \
+			echo "  Size: $$(ls -lh obj_dir/Vtb_system_top__inputs.vpp | awk '{print $$5}')"; \
+		else \
+			echo ""; \
+			echo "✗ Preprocessed file not found. Showing last 50 lines:"; \
+			tail -50 compile.log; \
+			exit 1; \
+		fi; \
+	else \
+		echo "Compilation successful"; \
+		if [ -f obj_dir/Vtb_system_top__inputs.vpp ]; then \
+			echo "✓ Preprocessed file: obj_dir/Vtb_system_top__inputs.vpp"; \
+			echo "  Size: $$(ls -lh obj_dir/Vtb_system_top__inputs.vpp | awk '{print $$5}')"; \
+		fi; \
+	fi
+
+compile-debug-gdbbt: extract-cva6-files
+	@echo "========================================="
+	@echo "Compiling CVA6 + Garuda (Verilator) - DEBUG + GDB MODE"
+	@echo "========================================="
+	@echo "Note: This will run Verilator with --debug --gdbbt for detailed crash info"
+	@echo "      This may produce a core dump or stack trace"
+	@echo ""
+	@# Check if GDB is available (required for --gdbbt)
+	@if ! command -v gdb >/dev/null 2>&1; then \
+		echo "Warning: GDB is not installed. --gdbbt will be ignored."; \
+		echo "         Install with: sudo apt-get install gdb"; \
+		echo ""; \
+	fi
+	@rm -f compile.log
+	@echo "Running Verilator with --debug --gdbbt flags..."
+	@echo "Note: If verilator_bin_dbg doesn't exist, --debug will fail. Use regular compile instead."
+	@$(VERILATOR) $(COMPILE_FLAGS) --debug --gdbbt --top-module tb_system_top $(INC_FLAGS) $(INTEGRATION_DIR)/tb_system_top.sv $(ALL_FILES) --binary -o Vtb_system_top >compile.log 2>&1; \
+	VERILATOR_EXIT=$$?; \
+	if [ $$VERILATOR_EXIT -ne 0 ]; then \
+		echo ""; \
+		echo "Compilation failed (exit code $$VERILATOR_EXIT). Showing last 150 lines:"; \
+		tail -150 compile.log; \
+		echo ""; \
+		echo "Full log saved to compile.log"; \
+		echo ""; \
+		echo "Note: If you see 'verilator_bin_dbg: No such file', --debug requires a debug build of Verilator."; \
+		echo "      Try regular 'compile' target instead, which uses the standard verilator_bin."; \
+		echo "      If a core dump was generated, check for core files in current directory"; \
+		exit 1; \
+	fi
+	@echo "Compilation successful: obj_dir/Vtb_system_top"
+
+run: compile
+	@./obj_dir/Vtb_system_top
+
+# ============================================================================
+# Icarus Verilog (default/fallback)
+# ============================================================================
+else
+IVERILOG := iverilog
+VVP := vvp
+SIM_OUTPUT := sim_system_top.vvp
+VCD_OUTPUT := tb_system_top.vcd
+
+IVERILOG_FLAGS := -g2012 -Wall -gstrict-expr-width
+INC_FLAGS := $(foreach dir,$(CVA6_INCDIRS),-I$(dir)) \
+	-I$(INTEGRATION_DIR) \
+	-I$(GARUDA_RTL) \
+	-DGARUDA_SIMPLE_PKG \
+	-DTARGET_CFG=$(TARGET_CFG)
+
+check-sim:
+	@$(IVERILOG) -V >nul 2>&1 || (echo "Error: Icarus Verilog not found. Install with: sudo apt-get install iverilog" && exit 1)
+	@echo "Using Icarus Verilog"
+
+compile: extract-cva6-files
+	@echo "========================================="
+	@echo "Compiling CVA6 + Garuda (Icarus Verilog)"
+	@echo "========================================="
+	@$(IVERILOG) $(IVERILOG_FLAGS) $(INC_FLAGS) -o $(SIM_OUTPUT) $(ALL_FILES) -l compile.log
+	@echo "Compilation successful: $(SIM_OUTPUT)"
+
+run: compile
+	@$(VVP) $(SIM_OUTPUT) +dump -l run.log
+endif
+
+# ============================================================================
+# Common targets
+# ============================================================================
+extract-cva6-files:
+	@echo "Extracting CVA6 files from Flist.cva6..."
+	@$(PYTHON) $(CVA6_FILES_SCRIPT) $(CVA6_REPO_DIR) $(TARGET_CFG) $(CVA6_FILES_LIST) >nul 2>&1 || echo "Extraction completed"
+
+clean:
+	@echo "Cleaning build artifacts..."
+	@$(PYTHON) -c "import os, shutil, glob; [shutil.rmtree(d, ignore_errors=True) for d in ['$(WORK)', 'obj_dir', 'csrc'] if os.path.exists(d)]; [os.remove(f) for f in glob.glob('*.log') + glob.glob('*.vcd') + glob.glob('simv*') + glob.glob('*.vvp')]"
+	@echo "Clean complete."
+
+help:
+	@echo "CVA6 + Garuda Integration Makefile"
+	@echo ""
+	@echo "Usage: make SIM=<simulator> <target>"
+	@echo ""
+	@echo "Simulators:"
+	@echo "  SIM=questa   - QuestaSim (Mentor Graphics)"
+	@echo "  SIM=vcs      - VCS (Synopsys)"
+	@echo "  SIM=verilator - Verilator (open-source)"
+	@echo "  SIM=iverilog - Icarus Verilog (default, limited SystemVerilog support)"
+	@echo ""
+	@echo "Targets:"
+	@echo "  make compile         - Compile testbench"
+	@echo "  make compile-debug   - Compile with --debug flag (Verilator only)"
+	@echo "  make compile-debug-gdbbt - Compile with --debug --gdbbt for crash analysis (Verilator only)"
+	@echo "  make run             - Run testbench"
+	@echo "  make clean           - Clean build artifacts"
+	@echo "  make debug-cmd       - Show exact command that will be executed (Verilator only)"
+	@echo ""
+	@echo "Examples:"
+	@echo "  make SIM=questa compile   # Compile with QuestaSim"
+	@echo "  make SIM=vcs run          # Compile and run with VCS"
+	@echo "  make SIM=verilator debug-cmd  # Show Verilator command"
+	@echo "  make clean                # Clean all build files"
+
+debug-cmd:
+ifeq ($(SIM),verilator)
+	@echo "Verilator command that will be executed:"
+	@echo "$(VERILATOR) $(COMPILE_FLAGS) --top-module tb_system_top $(INC_FLAGS) $(INTEGRATION_DIR)/tb_system_top.sv [ALL_FILES] --binary -o Vtb_system_top"
+	@echo ""
+	@echo "Number of files: $(shell echo '$(ALL_FILES)' | wc -w)"
+	@echo "First 5 files:"
+	@echo "$(shell echo '$(ALL_FILES)' | tr ' ' '\n' | head -5)"
+else
+	@echo "debug-cmd target only works with SIM=verilator"
+endif
+
+.PHONY: all compile compile-debug compile-debug-gdbbt dump-inputs run clean help check-sim extract-cva6-files debug-cmd
+all: compile run

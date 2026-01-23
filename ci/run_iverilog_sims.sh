@@ -38,4 +38,15 @@ run_tb "tb_attention_microkernel_latency" "sim_att_lat.vvp" \
   "garuda/rtl/attention_microkernel_engine.sv" \
   "garuda/tb/tb_attention_microkernel_latency.sv"
 
+# NOTE: tb_attention_microkernel_cvxif requires parameter arrays in packages,
+# which Icarus Verilog doesn't fully support. Skip for Icarus; use Verilator instead.
+# echo "== Skipping tb_attention_microkernel_cvxif (requires Verilator for full CVXIF test) =="
+# run_tb "tb_attention_microkernel_cvxif" "sim_att_cvxif.vvp" \
+#   "garuda/rtl/int8_mac_instr_pkg.sv" \
+#   "garuda/rtl/int8_mac_decoder.sv" \
+#   "garuda/rtl/int8_mac_unit.sv" \
+#   "garuda/rtl/attention_microkernel_engine.sv" \
+#   "garuda/rtl/int8_mac_coprocessor.sv" \
+#   "garuda/tb/tb_attention_microkernel_cvxif.sv"
+
 echo "All Icarus sims PASSED."

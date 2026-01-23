@@ -141,6 +141,17 @@ module int8_mac_unit
         overflow_comb = 1'b0; 
       end
       
+      // ATT_DOT_* instructions are handled by attention_microkernel_engine in coprocessor
+      ATT_DOT_SETUP,
+      ATT_DOT_RUN,
+      ATT_DOT_RUN_SCALE,
+      ATT_DOT_RUN_CLIP: begin
+        result_comb = '0;
+        valid_comb  = 1'b0;  // Not handled by this unit
+        we_comb     = 1'b0;
+        overflow_comb = 1'b0;
+      end
+      
       default: begin
         result_comb = '0;
         valid_comb  = 1'b0;
@@ -179,10 +190,10 @@ module int8_mac_unit
   
   // Assertions for verification
   `ifndef SYNTHESIS
-  // Check that opcode is valid
+  // Check that opcode is valid (ATT_DOT_* handled by microkernel engine in coprocessor)
   property p_valid_opcode;
     @(posedge clk_i) disable iff (!rst_ni)
-    (opcode_i inside {MAC8, MAC8_ACC, MUL8, CLIP8, SIMD_DOT, ILLEGAL});
+    (opcode_i inside {MAC8, MAC8_ACC, MUL8, CLIP8, SIMD_DOT, ATT_DOT_SETUP, ATT_DOT_RUN, ATT_DOT_RUN_SCALE, ATT_DOT_RUN_CLIP, ILLEGAL});
   endproperty
   assert property (p_valid_opcode) else $error("Invalid opcode received");
   

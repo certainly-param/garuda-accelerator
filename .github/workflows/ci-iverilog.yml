@@ -87,6 +87,7 @@ jobs:
             echo "| \`tb_systolic_array.sv\` | \`iverilog -g2012 ... && vvp\` | $([[ \"${{ job.status }}\" == \"success\" ]] && echo PASS || echo FAIL) |"
             echo "| \`tb_multi_issue_rename_integration.sv\` | \`iverilog -g2012 ... && vvp\` | $([[ \"${{ job.status }}\" == \"success\" ]] && echo PASS || echo FAIL) |"
             echo "| \`tb_attention_microkernel_latency.sv\` | \`iverilog -g2012 ... && vvp\` | $([[ \"${{ job.status }}\" == \"success\" ]] && echo PASS || echo FAIL) |"
+            echo "| \`tb_attention_microkernel_cvxif.sv\` | Verilator only | SKIP (Icarus limitation) |"  
             echo
             echo "**Icarus version**:"
             echo
@@ -142,3 +143,48 @@ jobs:
             print_module_stats ci/yosys_sa.txt systolic_array "systolic_array"
             echo "- Full log: uploaded as artifact \`yosys_stat\`"
           } >> "$GITHUB_STEP_SUMMARY"
+  verilator-sims:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Verilator
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y verilator
+
+      - name: Run Verilator simulations
+        run: |
+          bash ci/run_verilator_sims.sh | tee ci/verilator_sims.log
+
+      - name: Upload sim log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verilator_sims_log
+          path: ci/verilator_sims.log
+
+      - name: Verified (job summary)
+        if: always()
+        run: |
+          {
+            echo "## Verified (Verilator sims)"
+            echo
+            echo "| Testbench | Command | Result |"
+            echo "|---|---|---|"
+            echo "| \`tb_register_rename_table.sv\` | \`verilator --cc --exe --build ...\` | $([[ \"${{ job.status }}\" == \"success\" ]] && echo PASS || echo FAIL) |"
+            echo "| \`tb_systolic_array.sv\` | \`verilator --cc --exe --build ...\` | $([[ \"${{ job.status }}\" == \"success\" ]] && echo PASS || echo FAIL) |"
+            echo "| \`tb_multi_issue_rename_integration.sv\` | \`verilator --cc --exe --build ...\` | $([[ \"${{ job.status }}\" == \"success\" ]] && echo PASS || echo FAIL) |"
+            echo "| \`tb_attention_microkernel_latency.sv\` | \`verilator --cc --exe --build ...\` | $([[ \"${{ job.status }}\" == \"success\" ]] && echo PASS || echo FAIL) |"
+            echo "| \`tb_attention_microkernel_cvxif.sv\` | \`verilator --cc --exe --build ...\` | $([[ \"${{ job.status }}\" == \"success\" ]] && echo PASS || echo FAIL) |"
+            echo
+            echo "**Verilator version**:"
+            echo
+            echo "\`\`\`"
+            verilator --version | head -n 1
+            echo "\`\`\`"
+            echo
+            echo "**Log**: uploaded as artifact \`verilator_sims_log\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+  

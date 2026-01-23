@@ -1,6 +1,6 @@
 # Contributing to Garuda
 
-Contributions are welcome. This document provides guidelines for contributing to the Garuda RISC-V ML accelerator project.
+Contributions are welcome! This document provides guidelines for contributing to the Garuda RISC-V ML accelerator project.
 
 ## How to Contribute
 
@@ -30,6 +30,8 @@ Contributions are welcome. This document provides guidelines for contributing to
      - Ubuntu/Debian: `sudo apt-get install verilator`
    - **Yosys** (for synthesis)
      - Ubuntu/Debian: `sudo apt-get install yosys`
+   - **Python 3.7+** (for scripts and Cocotb tests)
+   - **Make** (for build automation)
 
 3. **Verify setup:**
    ```bash
@@ -123,6 +125,9 @@ garuda-accelerator/
 │   ├── tb/           # Testbenches
 │   ├── dv/           # Cocotb verification
 │   └── synth/        # Synthesis scripts
+├── integration/      # CVA6 integration
+│   ├── system_top.sv # System integration
+│   └── Makefile.commercial  # Multi-simulator build
 ├── ci/               # CI helper scripts
 └── .github/          # GitHub Actions workflows
 ```
@@ -132,14 +137,40 @@ garuda-accelerator/
 - All PRs require review before merging
 - Reviewers will check:
   - Code quality and adherence to standards
-  - Test coverage (testbenches must pass)
+  - Test coverage
   - Documentation completeness
-  - CI status (must pass)
+  - CI test results
+
+## Testing
+
+Before submitting a PR, ensure:
+
+1. **All testbenches pass:**
+   ```bash
+   bash ci/run_iverilog_sims.sh
+   ```
+
+2. **Verilator tests pass** (if applicable):
+   ```bash
+   bash ci/run_verilator_sims.sh
+   ```
+
+3. **Cocotb tests pass** (if applicable):
+   ```bash
+   cd garuda/dv
+   make
+   ```
+
+4. **CI passes**: GitHub Actions will automatically run all tests
+
+## License
+
+By contributing, you agree that your contributions will be licensed under the Apache License 2.0, the same license as the project.
 
 ## Questions?
 
-- Open a GitHub Issue for questions about contributing
-- Check existing issues before creating a new one
-- Be respectful and constructive in discussions
+- Open a GitHub Issue for questions
+- Check existing issues and discussions
+- Review the main README.md for project overview
 
 Thank you for contributing to Garuda!

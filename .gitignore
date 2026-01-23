@@ -23,10 +23,16 @@ transcript
 *.a
 *.mk
 
+# Integration / Verilator artifacts
+Vtb_system_top
+Vtb_*
+*.vpp
+
 # Build artifacts
 build/
 *.pyc
 __pycache__/
+cva6_files.list
 
 # Editor files
 *.swp
